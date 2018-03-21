@@ -11,6 +11,7 @@ password = YOUR_PASSWORD
 
 if __name__ == '__main__':
 	pixiv = pixiv.PixivApi(pixiv_id, password)
+
 	# get 5 image from rank male.
 	pool = pixiv.get_rank_male(5)
 	for item in pool:
@@ -25,8 +26,14 @@ if __name__ == '__main__':
 		print('author link: {}'.format(item['author']))
 	print()
 	
-	# get new image link from you follow author(fetch 1 page from page 1).
-	pool = pixiv.get_follow(1,1)
+	# get new image link from you follow author(page 3).
+	pool = pixiv.get_follow(3)
+	for link in pool:
+		print(link)
+	print()
+
+	# get author's image at page 1(pixiv_id, page)
+	pool = pixiv.get_author_images(2973809, 1)
 	for link in pool:
 		print(link)
 ```
