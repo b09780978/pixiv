@@ -53,24 +53,41 @@ class PixivApi(object):
 
 	'''
 		Input:
-			pages : how many pages that you want to fetch.
-			start_page : start from which page(option, default=1)
+			page : which page that you want to fetch.
 		Output:
 			list of image link.
 	'''
-	def get_follow(self, pages=1, start_page=1):
-		assert pages>0, 'pages must > 0.'
-		assert start_page>0, 'start_page must > 0'
+	def get_follow(self, page=1):
+		assert page>0, 'pages must > 0.'
 		target_url = 'https://www.pixiv.net/bookmark_new_illust.php?p={}'
 		imagePool = []
-		for page_index in range(start_page, start_page+pages):
-			response = self.session.get(target_url.format(page_index))
-			parser = BeautifulSoup(response.text, 'html.parser')
-			for block in parser.select('#js-mount-point-latest-following'):
-				data = eval(block['data-items'].replace('null', 'None').replace('true', 'True').replace('false', 'False'))
-				for image_item in data:
-					imagePool.append(image_item['url'].replace('\\',''))
-			time.sleep(0.5)
+
+		response = self.session.get(target_url.format(page))
+		parser = BeautifulSoup(response.text, 'html.parser')
+		for block in parser.select('#js-mount-point-latest-following'):
+			data = eval(block['data-items'].replace('null', 'None').replace('true', 'True').replace('false', 'False'))
+			for image_item in data:
+				imagePool.append(image_item['url'].replace('\\',''))
+
+		return imagePool
+
+	'''
+		Input:
+			author_id : author's pixiv id.
+			page : which page your want to fetch.
+		Output:
+			image link list.
+	'''
+	def get_author_images(self, author_id, page=1):
+		assert page>0, 'page must > 0.'
+		target_url = 'https://www.pixiv.net/member_illust.php?id={}&type=all&p={}'
+		response = self.session.get(target_url.format(author_id, page))
+		parser = BeautifulSoup(response.text, 'html.parser')
+
+		imagePool = []
+		for item in parser.select('._layout-thumbnail'):
+			imagePool.append(item.img['data-src'])
+
 		return imagePool
 
 	'''
