@@ -12,28 +12,49 @@ password = YOUR_PASSWORD
 if __name__ == '__main__':
 	pixivapi = pixiv.PixivApi(pixiv_id, password)
 
-	# get 5 image from rank male.
-	pool = pixivapi.get_rank_male(5)
+	'''
+		Get rank page.
+	'''
+	# get daliy r18
+	pool = pixivapi.get_rank(50, daily=True, r18=True)
 	for item in pool:
-		print('image link: {}'.format(item['img']))
-		print('author link: {}'.format(item['author']))
-	print()
-	
-	# get 2 image from rank r18.
-	pool = pixivapi.get_r18_top(2)
-	for item in pool:
-		print('image link: {}'.format(item['img']))
-		print('author link: {}'.format(item['author']))
-	print()
-	
-	# get new image link from you follow author(page 3).
-	pool = pixivapi.get_follow(3)
-	for link in pool:
-		print(link)
-	print()
+		print(item['id'], item['author'], item['url'])
 
-	# get author's image at page 1(pixiv_id, page)
+	# get daliy
+	pool = pixivapi.get_rank(50, daily=True)
+	for item in pool:
+		print(item['id'], item['author'], item['url'])
+
+	# get rank male
+	pool = pixivapi.get_rank(50)
+	for item in pool:
+		print(item['id'], item['author'], item['url'])
+
+	# get rank female
+	pool = pixivapi.get_rank(50, male=False)
+	for item in pool:
+		print(item['id'], item['author'], item['url'])
+
+	# get rank male r18
+	pool = pixivapi.get_rank(50, r18=True)
+	for item in pool:
+		print(item['id'], item['author'], item['url'])
+
+	# get rank female r18
+	pool = pixivapi.get_rank(50, male=False, r18=True)
+	for item in pool:
+		print(item['id'], item['author'], item['url'])
+
+	# get author's image at page 1.
 	pool = pixivapi.get_author_images(2973809, 1)
-	for link in pool:
-		print(link)
+	for item in pool:
+		print(item['id'], item['url'])
+
+	# download pixiv image.
+	pixivapi.download('https://i.pximg.net/c/240x240/img-master/img/2018/03/20/00/12/38/67820508_p0_master1200.jpg')
+
+	# get user follow.
+	pool = pixivapi.get_follow()
+	for item in pool:
+		print(item['id'], item['url'])
 ```
