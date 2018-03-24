@@ -1,7 +1,8 @@
 #-*- coding: utf-8
+import json
+import time
 import requests
 from bs4 import BeautifulSoup
-import time
 
 # pixiv url and login url.
 PIXIV = 'https://www.pixiv.net'
@@ -113,7 +114,7 @@ class PixivApi(object):
 		response = self.session.get(target_url.format(page))
 		parser = BeautifulSoup(response.text, 'html.parser')
 		for block in parser.select('#js-mount-point-latest-following'):
-			data = eval(block['data-items'].replace('null', 'None').replace('true', 'True').replace('false', 'False'))
+			data = json.loads(block['data-items'])
 			for image_item in data:
 				imagePool.append( { 'url' : image_item['url'].replace('\\',''), 'id' : image_item['illustId'] })
 
