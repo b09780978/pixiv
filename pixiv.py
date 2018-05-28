@@ -151,8 +151,8 @@ class PixivApi(object):
 			list content rank male image's link and author's link.
 			[ {'url': image_link, 'author': author_link, 'id' : image_id} ]
 	'''
-	def get_rank(self, images=10, male=True, daily=False, r18=False):
-		assert images>=0, 'images must >= 0'
+	def get_rank(self, page=1, male=True, daily=False, r18=False):
+		# assert images>=0, 'images must >= 0'
 
 		mode = None
 		# decide whether use daily.
@@ -163,26 +163,19 @@ class PixivApi(object):
 			if r18:
 				mode += '_r18'
 
-		target_url = 'https://www.pixiv.net/ranking.php?mode={}'.format(mode)
+		target_url = 'https://www.pixiv.net/ranking.php?mode={}&p={}&format=json'.format(mode, page)
 		response = self.session.get(target_url)
 
 		# check whether can get page.
 		if response.status_code != 200:
 			raise PixivApiException('Get rank {} fail, {}.'.format(target_url, response.status_code))
 
-		parser = BeautifulSoup(response.text, 'html.parser')
-
-		counter = 0
 		imagePool = []
-		for block in parser.select('.ranking-item'):
-			if counter >= images:
-				break
-			image_block = block.find_all('div')[1]
-			author_link = '{}{}'.format(PIXIV, image_block.a['href'])
-			image_id = block['data-id']
-			image_link = image_block.div.img['data-src']
-			imagePool.append({'url' : image_link, 'author' : author_link, 'id' : image_id })
-			counter += 1
+		pixiv_json = response.json()
+
+		if pixiv_json.get('error', None) is None:
+			for item in pixiv_json['contents']:
+				imagePool.append({'url' : item['url'], 'author_id' : item['user_id'], 'id' : item['illust_id']})
 
 		return imagePool
 
