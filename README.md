@@ -16,34 +16,34 @@ if __name__ == '__main__':
 		Get rank page.
 	'''
 	# get daliy r18
-	pool = pixivapi.get_rank(50, daily=True, r18=True)
+	pool = pixivapi.get_rank(1, daily=True, r18=True)
 	for item in pool:
-		print(item['id'], item['author'], item['url'])
+		print(item['id'], item['author_id'], item['url'])
 
 	# get daliy
-	pool = pixivapi.get_rank(50, daily=True)
+	pool = pixivapi.get_rank(1, daily=True)
 	for item in pool:
-		print(item['id'], item['author'], item['url'])
+		print(item['id'], item['author_id'], item['url'])
 
 	# get rank male
-	pool = pixivapi.get_rank(50)
+	pool = pixivapi.get_rank(1)
 	for item in pool:
-		print(item['id'], item['author'], item['url'])
+		print(item['id'], item['author_id'], item['url'])
 
 	# get rank female
-	pool = pixivapi.get_rank(50, male=False)
+	pool = pixivapi.get_rank(1, male=False)
 	for item in pool:
-		print(item['id'], item['author'], item['url'])
+		print(item['id'], item['author_id'], item['url'])
 
 	# get rank male r18
-	pool = pixivapi.get_rank(50, r18=True)
+	pool = pixivapi.get_rank(1, r18=True)
 	for item in pool:
-		print(item['id'], item['author'], item['url'])
+		print(item['id'], item['author_id'], item['url'])
 
 	# get rank female r18
-	pool = pixivapi.get_rank(50, male=False, r18=True)
+	pool = pixivapi.get_rank(1, male=False, r18=True)
 	for item in pool:
-		print(item['id'], item['author'], item['url'])
+		print(item['id'], item['author_id'], item['url'])
 
 	# get author's image at page 1.
 	pool = pixivapi.get_author_images(2973809, 1)
