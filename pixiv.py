@@ -1,6 +1,7 @@
 #-*- coding: utf-8
 import json
 import time
+import re
 import requests
 from bs4 import BeautifulSoup
 
@@ -10,7 +11,9 @@ LOGIN_URL = 'https://accounts.pixiv.net/login'
 LOGIN_POST_URL = 'https://accounts.pixiv.net/api/login?lang=zh_tw'
 
 # user-agnet.
-headers = {'User-Agent' : 'Mozilla/5.0 (Windows NT 6.1; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/62.0.3202.94 Safari/537.36'}
+headers = {
+	'User-Agent' : 'Mozilla/5.0 (Windows NT 6.1; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/62.0.3202.94 Safari/537.36'
+}
 
 # login data.
 LOGIN_PARAM = { 'lang' : 'zh_tw',
@@ -46,9 +49,10 @@ class PixivApi(object):
 		set your pixiv_id and password, make you can fetch all image(over 18).
 		pixiv = PixivApi(pixiv_id, password)
 	'''
-	def __init__(self, pixiv_id, password):	
+	def __init__(self, pixiv_id, password, parser='html.parser'):
 		self.pixiv_id = pixiv_id
 		self.password = password
+		self.parser = parser
 		self.session = requests.Session()
 		self.session.headers.update(headers)
 		self.login()
@@ -61,22 +65,53 @@ class PixivApi(object):
 			None, download the image.
 	'''
 	def download(self, image_url, file_name=None):
-		if file_name is None:
-			file_name = image_url.split('/')[-1]
+		FORMAT_ID = '\d{5,}'
+
+		image_id = re.search(FORMAT_ID, image_url)
+		if image_id is None:
+			raise PixivApiException('Can\'t get image id')
+
+		image_id = image_id.group()
+		referer_image_url = 'https://www.pixiv.net/member_illust.php?mode=medium&illust_id={}'.format(image_id)
+
+		response = self.session.get(referer_image_url)
+
+		if response.status_code != 200:
+			raise 'Download fail, {}'.format(response.status_code)
+
+		response.encoding = 'utf-8'
+		url = re.search('\"https.{,30}?img-original.+?(jpg|png|mp4)\"', response.text)
+		if url:
+			url = url.group()
+			download_url = 'https://' + url[11:-1].replace('\\', '')
 		else:
-			file_type = image_url.split('.')[-1]
+			raise PixivApiException('Download fail, illust_id: {} not found'.format(image_id))
+		
+		print('download_url: {}'.format(download_url))
+
+		if file_name is None:
+			file_name = download_url.split('/')[-1]
+		else:
+			file_type = download_url.split('.')[-1]
 			file_name_name += '.' + file_type
 
-		response = self.session.get(image_url, stream=True)
+		# Set Referer header to bypass 403 forbidden
+		self.session.headers['Referer'] = referer_image_url
+		response = self.session.get(download_url, stream=True)
 
 		# check whether can download.
 		if response.status_code != 200:
+			self.session.headers.pop('Referer')
 			raise PixivApiException('Download {} fail, {}.'.format(image_url, response.status_code))
 
+		# Download file and store in current directory
 		with open(file_name, 'wb') as f:
 			for chunk in response.iter_content(chunk_size=1024):
 				if chunk:
 					f.write(chunk)
+
+		# Clean Referer header
+		self.session.headers.pop('Referer')
 
 
 	'''
@@ -84,7 +119,7 @@ class PixivApi(object):
 	'''
 	def login(self):
 		response = self.session.get(LOGIN_URL, params=LOGIN_PARAM)
-		parser = BeautifulSoup(response.text, 'html.parser')
+		parser = BeautifulSoup(response.text, self.parser)
 		post_key = parser.select('[name=post_key]')[0]['value']
 
 		# prevent to fast.
@@ -112,7 +147,7 @@ class PixivApi(object):
 		imagePool = []
 
 		response = self.session.get(target_url.format(page))
-		parser = BeautifulSoup(response.text, 'html.parser')
+		parser = BeautifulSoup(response.text, self.parser)
 		for block in parser.select('#js-mount-point-latest-following'):
 			data = json.loads(block['data-items'])
 			for image_item in data:
@@ -136,7 +171,7 @@ class PixivApi(object):
 		if response.status_code != 200:
 			raise PixivApiException('Author id {} doesn\'t exist, {}.'.format(author_id, response.status_code))
 
-		parser = BeautifulSoup(response.text, 'html.parser')
+		parser = BeautifulSoup(response.text, self.parser)
 
 		imagePool = []
 		for item in parser.select('._layout-thumbnail'):
