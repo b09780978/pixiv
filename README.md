@@ -50,8 +50,10 @@ if __name__ == '__main__':
 	for item in pool:
 		print(item['id'], item['url'])
 
-	# download pixiv image.
+	# download pixiv image by url.
 	pixivapi.download('https://i.pximg.net/c/240x240/img-master/img/2018/03/20/00/12/38/67820508_p0_master1200.jpg')
+	# download pixiv image by illust_id
+	pixivapi.download('73124903')
 
 	# get user follow.
 	pool = pixivapi.get_follow()
