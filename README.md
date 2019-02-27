@@ -4,13 +4,19 @@ a python project to fetch pixiv.net's image.
 # Usage
 ``` python
 #-*- coding: utf-8 -*-
-import pixiv
+from pixiv import PixivApi
 
 pixiv_id = YOUR_PIXIV_ACCOUNT
 password = YOUR_PASSWORD
 
 if __name__ == '__main__':
-	pixivapi = pixiv.PixivApi(pixiv_id, password)
+	pixivapi = PixivApi(pixiv_id, password)
+
+	'''
+		Search by keyword.
+	'''
+	for item in pixivapi.search('宝多六花', 2):		
+		print(item)
 
 	'''
 		Get rank page.
@@ -59,4 +65,13 @@ if __name__ == '__main__':
 	pool = pixivapi.get_follow()
 	for item in pool:
 		print(item['id'], item['url'])
+
+	# download favorite images.
+	pool = pixivapi.get_favorite(3)
+	for item in pool:
+		pixivapi.download(item)
+
+	# Note you need to close PixivApi session.
+	pixivapi.close()
+	print('Finish test')
 ```
