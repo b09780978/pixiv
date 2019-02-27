@@ -53,6 +53,7 @@ class BasePixivApi(requests.Session):
 	'''
 	def download(self, image_url, file_name=None):
 		FORMAT_ID = '\d{5,}'
+		FORMAT_IMAGE = '\"https.{,30}?img-original.+?(jpg|png|mp4)\"'
 
 		image_id = re.search(FORMAT_ID, image_url)
 		if image_id is None:
@@ -67,7 +68,7 @@ class BasePixivApi(requests.Session):
 			raise 'Download fail, {}'.format(response.status_code)
 
 		response.encoding = 'utf-8'
-		url = re.search('\"https.{,30}?img-original.+?(jpg|png|mp4)\"', response.text)
+		url = re.search(FORMAT_IMAGE, response.text)
 		if url:
 			url = url.group()
 			download_url = 'https://' + url[11:-1].replace('\\', '')
@@ -105,7 +106,7 @@ class BasePixivApi(requests.Session):
 			list of image link {'url' : image_url, 'id' : image_id}.
 	'''
 	def get_follow(self, page=1):
-		assert page>0, 'pages must > 0.'
+		page = 1 if page<1 else page
 		target_url = 'https://www.pixiv.net/bookmark_new_illust.php?p={}'
 		imagePool = []
 
@@ -126,7 +127,7 @@ class BasePixivApi(requests.Session):
 			image link list {'url' : image_url, 'id' : image_id}.
 	'''
 	def get_author_images(self, author_id, page=1):
-		assert page>0, 'page must > 0.'
+		page = 1 if page<1 else page
 		target_url = 'https://www.pixiv.net/member_illust.php?id={}&type=all&p={}'
 		response = self.get(target_url.format(author_id, page))
 
@@ -150,9 +151,8 @@ class BasePixivApi(requests.Session):
 			[ {'url': image_link, 'author': author_link, 'id' : image_id} ]
 	'''
 	def get_rank(self, page=1, male=True, daily=False, r18=False):
-		# assert images>=0, 'images must >= 0'
-
 		mode = None
+		page = 1 if page<1 else page
 		# decide whether use daily.
 		if daily:
 			mode = 'daily_r18' if r18 else 'daily'
@@ -228,13 +228,38 @@ class PixivApi(BasePixivApi):
 			list of image link.
 	'''
 	def get_favorite(self, page=1):
-		FAVORITE_URL = 'https://www.pixiv.net/bookmark.php?rest=show&p={}&order=desc'.format(page)
-		response = self.get(FAVORITE_URL)
+		page = 1 if page<1 else page
+		FAVORITE_URL = 'https://www.pixiv.net/bookmark.php?rest=show&p={}&order=desc'
+		response = self.get(FAVORITE_URL.format(page))
 		if response.status_code != 200:
-			raise PixivApiException('get fail, {}.'.format(response.status_code))
+			raise PixivApiException('Get favorite fail, {}.'.format(response.status_code))
 
 		response.encoding = 'utf-8'
 		
 		parser = BeautifulSoup(response.text, self.parser)
 		imagePool = [ element['data-src'] for element in parser.select('[data-src]') if re.search('(jpg|png|mp4)', element['data-src']) is not None ]
+
+		return imagePool
+
+	'''
+		Input:
+			keyword : the keyword you want to search.
+			page : which page that you want to fetch.
+		Output:
+			list of image link.
+	'''
+	def search(self, keyword, page=1):
+		if len(keyword) == 0:
+			raise PixivApiException('Search keyword can\t be empty.')
+		page = 1 if page<1 else page
+		SEARCH_URL = 'https://www.pixiv.net/search.php?s_mode=s_tag&word={}&order=date_d&p={}'
+		response = self.get(SEARCH_URL.format(keyword, page))
+		if response.status_code != 200:
+			raise PixivApiException('search fail, {}'.format(response.status_code))
+
+		response.encoding = 'utf-8'
+
+		FORMAT_IMAGE = ';(https.{,30}?img-master.+?(jpg|png|mp4))&quot'
+		imagePool = [ match[0].replace('\\', '') for match in re.findall(FORMAT_IMAGE, response.text) ]
+
 		return imagePool

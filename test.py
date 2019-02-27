@@ -8,6 +8,12 @@ if __name__ == '__main__':
 	pixivapi = PixivApi(pixiv_id, password)
 
 	'''
+		Search by keyword.
+	'''
+	for item in pixivapi.search('宝多六花', 2):		
+		print(item)
+
+	'''
 		Get rank page.
 	'''
 	# get daliy r18
@@ -60,4 +66,6 @@ if __name__ == '__main__':
 	for item in pool:
 		pixivapi.download(item)
 
+	# Note you need to close PixivApi session.
+	pixivapi.close()
 	print('Finish test')
