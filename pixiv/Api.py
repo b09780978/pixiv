@@ -1,9 +1,10 @@
-#-*- coding: utf-8
+#-*- coding: utf-8 -*-
 import json
 import time
 import re
 import requests
 from bs4 import BeautifulSoup
+from .Exception import PixivApiException
 
 # pixiv url and login url.
 PIXIV = 'https://www.pixiv.net'
@@ -33,29 +34,15 @@ LOGIN_POST_DATA = {
 	'return_to' : 'https://www.pixiv.net/',
 }
 
-'''
-	PixivApiException: deal with PixivApi Exception.
-'''
-class PixivApiException(Exception):
-
-	def __init__(self, error_message):
-		self.error_message = error_message
-
-	def __str__(self):
-		return self.error_message
-
-class PixivApi(object):
+class BasePixivApi(requests.Session):
 	'''
 		set your pixiv_id and password, make you can fetch all image(over 18).
 		pixiv = PixivApi(pixiv_id, password)
 	'''
-	def __init__(self, pixiv_id, password, parser='html.parser'):
-		self.pixiv_id = pixiv_id
-		self.password = password
+	def __init__(self, parser='html.parser'):
+		super(BasePixivApi, self).__init__()
 		self.parser = parser
-		self.session = requests.Session()
-		self.session.headers.update(headers)
-		self.login()
+		self.headers.update(headers)
 
 	'''
 		Input:
@@ -74,7 +61,7 @@ class PixivApi(object):
 		image_id = image_id.group()
 		referer_image_url = 'https://www.pixiv.net/member_illust.php?mode=medium&illust_id={}'.format(image_id)
 
-		response = self.session.get(referer_image_url)
+		response = self.get(referer_image_url)
 
 		if response.status_code != 200:
 			raise 'Download fail, {}'.format(response.status_code)
@@ -85,9 +72,7 @@ class PixivApi(object):
 			url = url.group()
 			download_url = 'https://' + url[11:-1].replace('\\', '')
 		else:
-			raise PixivApiException('Download fail, illust_id: {} not found'.format(image_id))
-		
-		print('download_url: {}'.format(download_url))
+			raise PixivApiException('Download fail, illust_id: {} not found'.format(image_id))		
 
 		if file_name is None:
 			file_name = download_url.split('/')[-1]
@@ -96,12 +81,12 @@ class PixivApi(object):
 			file_name_name += '.' + file_type
 
 		# Set Referer header to bypass 403 forbidden
-		self.session.headers['Referer'] = referer_image_url
-		response = self.session.get(download_url, stream=True)
+		self.headers['Referer'] = referer_image_url
+		response = self.get(download_url, stream=True)
 
 		# check whether can download.
 		if response.status_code != 200:
-			self.session.headers.pop('Referer')
+			self.headers.pop('Referer')
 			raise PixivApiException('Download {} fail, {}.'.format(image_url, response.status_code))
 
 		# Download file and store in current directory
@@ -111,29 +96,7 @@ class PixivApi(object):
 					f.write(chunk)
 
 		# Clean Referer header
-		self.session.headers.pop('Referer')
-
-
-	'''
-		login your acount.
-	'''
-	def login(self):
-		response = self.session.get(LOGIN_URL, params=LOGIN_PARAM)
-		parser = BeautifulSoup(response.text, self.parser)
-		post_key = parser.select('[name=post_key]')[0]['value']
-
-		# prevent to fast.
-		time.sleep(0.5)
-		LOGIN_POST_DATA.update({'pixiv_id' : self.pixiv_id,
-								'password' : self.password,
-								'post_key' : post_key,})
-		self.session.post(LOGIN_POST_URL, data=LOGIN_POST_DATA)
-
-		# use r18 rank to check whether success login.
-		check_login_url = 'https://www.pixiv.net/ranking.php?mode=daily_r18&content=illust'
-		response = self.session.get(check_login_url)
-		if response.status_code != 200:
-			raise PixivApiException('Login fail, {}.'.format(response.status_code))
+		self.headers.pop('Referer')
 
 	'''
 		Input:
@@ -146,7 +109,7 @@ class PixivApi(object):
 		target_url = 'https://www.pixiv.net/bookmark_new_illust.php?p={}'
 		imagePool = []
 
-		response = self.session.get(target_url.format(page))
+		response = self.get(target_url.format(page))
 		parser = BeautifulSoup(response.text, self.parser)
 		for block in parser.select('#js-mount-point-latest-following'):
 			data = json.loads(block['data-items'])
@@ -165,7 +128,7 @@ class PixivApi(object):
 	def get_author_images(self, author_id, page=1):
 		assert page>0, 'page must > 0.'
 		target_url = 'https://www.pixiv.net/member_illust.php?id={}&type=all&p={}'
-		response = self.session.get(target_url.format(author_id, page))
+		response = self.get(target_url.format(author_id, page))
 
 		# check whether author exits.
 		if response.status_code != 200:
@@ -199,7 +162,7 @@ class PixivApi(object):
 				mode += '_r18'
 
 		target_url = 'https://www.pixiv.net/ranking.php?mode={}&p={}&format=json'.format(mode, page)
-		response = self.session.get(target_url)
+		response = self.get(target_url)
 
 		# check whether can get page.
 		if response.status_code != 200:
@@ -214,8 +177,64 @@ class PixivApi(object):
 
 		return imagePool
 
-	def __del__(self):
-		self.session.close()
+'''
+	Pixiv Guest Api:
+		Without login your account, but the image you can get is limited
+'''
+class PixivGuestApi(BasePixivApi):
+	pass
 
-	def close(self):
-		self.session.close()
+'''
+	Pixiv Api:
+		Auto login your account for you get image resource
+'''
+class PixivApi(BasePixivApi):
+	'''
+		set your pixiv_id and password, make you can fetch all image(over 18).
+		pixiv = PixivApi(pixiv_id, password)
+	'''
+	def __init__(self, pixiv_id, password, parser='html.parser'):
+		super(PixivApi, self).__init__(parser)
+		self.pixiv_id = pixiv_id
+		self.password = password
+		self.headers.update(headers)
+		self.login()
+
+	'''
+		login your acount.
+	'''
+	def login(self):
+		response = self.get(LOGIN_URL, params=LOGIN_PARAM)
+		parser = BeautifulSoup(response.text, self.parser)
+		post_key = parser.select('[name=post_key]')[0]['value']
+
+		# prevent to fast.
+		time.sleep(0.5)
+		LOGIN_POST_DATA.update({'pixiv_id' : self.pixiv_id,
+								'password' : self.password,
+								'post_key' : post_key,})
+		self.post(LOGIN_POST_URL, data=LOGIN_POST_DATA)
+
+		# use r18 rank to check whether success login.
+		check_login_url = 'https://www.pixiv.net/ranking.php?mode=daily_r18&content=illust'
+		response = self.get(check_login_url)
+		if response.status_code != 200:
+			raise PixivApiException('Login fail, {}.'.format(response.status_code))
+
+	'''
+		Input:
+			page : which page that you want to fetch.
+		Output:
+			list of image link.
+	'''
+	def get_favorite(self, page=1):
+		FAVORITE_URL = 'https://www.pixiv.net/bookmark.php?rest=show&p={}&order=desc'.format(page)
+		response = self.get(FAVORITE_URL)
+		if response.status_code != 200:
+			raise PixivApiException('get fail, {}.'.format(response.status_code))
+
+		response.encoding = 'utf-8'
+		
+		parser = BeautifulSoup(response.text, self.parser)
+		imagePool = [ element['data-src'] for element in parser.select('[data-src]') if re.search('(jpg|png|mp4)', element['data-src']) is not None ]
+		return imagePool
