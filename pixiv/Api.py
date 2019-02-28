@@ -46,101 +46,25 @@ class BasePixivApi(requests.Session):
 
 	'''
 		Input:
-			image_url : image's url.
-			file_name : store file name.
-		Output:
-			None, download the image.
-	'''
-	def download(self, image_url, file_name=None):
-		FORMAT_ID = '\d{5,}'
-		FORMAT_IMAGE = '\"https.{,30}?img-original.+?(jpg|png|mp4)\"'
-
-		image_id = re.search(FORMAT_ID, image_url)
-		if image_id is None:
-			raise PixivApiException('Can\'t get image id')
-
-		image_id = image_id.group()
-		referer_image_url = 'https://www.pixiv.net/member_illust.php?mode=medium&illust_id={}'.format(image_id)
-
-		response = self.get(referer_image_url)
-
-		if response.status_code != 200:
-			raise 'Download fail, {}'.format(response.status_code)
-
-		response.encoding = 'utf-8'
-		url = re.search(FORMAT_IMAGE, response.text)
-		if url:
-			url = url.group()
-			download_url = 'https://' + url[11:-1].replace('\\', '')
-		else:
-			raise PixivApiException('Download fail, illust_id: {} not found'.format(image_id))		
-
-		if file_name is None:
-			file_name = download_url.split('/')[-1]
-		else:
-			file_type = download_url.split('.')[-1]
-			file_name_name += '.' + file_type
-
-		# Set Referer header to bypass 403 forbidden
-		self.headers['Referer'] = referer_image_url
-		response = self.get(download_url, stream=True)
-
-		# check whether can download.
-		if response.status_code != 200:
-			self.headers.pop('Referer')
-			raise PixivApiException('Download {} fail, {}.'.format(image_url, response.status_code))
-
-		# Download file and store in current directory
-		with open(file_name, 'wb') as f:
-			for chunk in response.iter_content(chunk_size=1024):
-				if chunk:
-					f.write(chunk)
-
-		# Clean Referer header
-		self.headers.pop('Referer')
-
-	'''
-		Input:
-			page : which page that you want to fetch.
-		Output:
-			list of image link {'url' : image_url, 'id' : image_id}.
-	'''
-	def get_follow(self, page=1):
-		page = 1 if page<1 else page
-		target_url = 'https://www.pixiv.net/bookmark_new_illust.php?p={}'
-		imagePool = []
-
-		response = self.get(target_url.format(page))
-		parser = BeautifulSoup(response.text, self.parser)
-		for block in parser.select('#js-mount-point-latest-following'):
-			data = json.loads(block['data-items'])
-			for image_item in data:
-				imagePool.append( { 'url' : image_item['url'].replace('\\',''), 'id' : image_item['illustId'] })
-
-		return imagePool
-
-	'''
-		Input:
 			author_id : author's pixiv id.
 			page : which page your want to fetch.
 		Output:
 			image link list {'url' : image_url, 'id' : image_id}.
 	'''
-	def get_author_images(self, author_id, page=1):
-		page = 1 if page<1 else page
-		target_url = 'https://www.pixiv.net/member_illust.php?id={}&type=all&p={}'
-		response = self.get(target_url.format(author_id, page))
+	def get_author_images(self, author_id):
+		target_url = 'https://www.pixiv.net/ajax/user/{}/profile/top'
+		response = self.get(target_url.format(author_id))
 
 		# check whether author exits.
 		if response.status_code != 200:
 			raise PixivApiException('Author id {} doesn\'t exist, {}.'.format(author_id, response.status_code))
 
-		parser = BeautifulSoup(response.text, self.parser)
+		pixiv_json = response.json()
 
-		imagePool = []
-		for item in parser.select('._layout-thumbnail'):
-			imagePool.append( { 'url' : item.img['data-src'], 'id' : item.img['data-id'] })
+		if pixiv_json['error'] != False:
+			raise PixivApiException('Author id {} doesn\'t exist.'.format(author_id))
 
+		imagePool = [ item[1]['url'] for item in pixiv_json['body']['illusts'].items() ]
 		return imagePool
 
 	'''
@@ -174,6 +98,29 @@ class BasePixivApi(requests.Session):
 		if pixiv_json.get('error', None) is None:
 			for item in pixiv_json['contents']:
 				imagePool.append({'url' : item['url'], 'author_id' : item['user_id'], 'id' : item['illust_id']})
+
+		return imagePool
+
+	'''
+	Input:
+		keyword : the keyword you want to search.
+		page : which page that you want to fetch.
+		Output:
+			list of image link.
+	'''
+	def search(self, keyword, page=1):
+		if len(keyword) == 0:
+			raise PixivApiException('Search keyword can\t be empty.')
+		page = 1 if page<1 else page
+		SEARCH_URL = 'https://www.pixiv.net/search.php?s_mode=s_tag&word={}&order=date_d&p={}'
+		response = self.get(SEARCH_URL.format(keyword, page))
+		if response.status_code != 200:
+			raise PixivApiException('search fail, {}'.format(response.status_code))
+
+		response.encoding = 'utf-8'
+
+		FORMAT_IMAGE = ';(https.{,30}?img-master.+?(jpg|png|mp4))&quot'
+		imagePool = [ match[0].replace('\\', '') for match in re.findall(FORMAT_IMAGE, response.text) ]
 
 		return imagePool
 
@@ -225,6 +172,26 @@ class PixivApi(BasePixivApi):
 		Input:
 			page : which page that you want to fetch.
 		Output:
+			list of image link {'url' : image_url, 'id' : image_id}.
+	'''
+	def get_follow(self, page=1):
+		page = 1 if page<1 else page
+		target_url = 'https://www.pixiv.net/bookmark_new_illust.php?p={}'
+		imagePool = []
+
+		response = self.get(target_url.format(page))
+		parser = BeautifulSoup(response.text, self.parser)
+		for block in parser.select('#js-mount-point-latest-following'):
+			data = json.loads(block['data-items'])
+			for image_item in data:
+				imagePool.append( { 'url' : image_item['url'].replace('\\',''), 'id' : image_item['illustId'] })
+
+		return imagePool
+
+	'''
+		Input:
+			page : which page that you want to fetch.
+		Output:
 			list of image link.
 	'''
 	def get_favorite(self, page=1):
@@ -243,23 +210,55 @@ class PixivApi(BasePixivApi):
 
 	'''
 		Input:
-			keyword : the keyword you want to search.
-			page : which page that you want to fetch.
+			image_url : image's url.
+			file_name : store file name.
 		Output:
-			list of image link.
+			None, download the image.
 	'''
-	def search(self, keyword, page=1):
-		if len(keyword) == 0:
-			raise PixivApiException('Search keyword can\t be empty.')
-		page = 1 if page<1 else page
-		SEARCH_URL = 'https://www.pixiv.net/search.php?s_mode=s_tag&word={}&order=date_d&p={}'
-		response = self.get(SEARCH_URL.format(keyword, page))
+	def download(self, image_url, file_name=None):
+		FORMAT_ID = '\d{5,}'
+		FORMAT_IMAGE = '\"https.{,30}img-original.+?(jpg|png|mp4)\"'
+
+		image_id = re.search(FORMAT_ID, image_url)
+		if image_id is None:
+			raise PixivApiException('Can\'t get image id')
+
+		image_id = image_id.group()
+		referer_image_url = 'https://www.pixiv.net/member_illust.php?mode=medium&illust_id={}'.format(image_id)
+
+		response = self.get(referer_image_url)
+
 		if response.status_code != 200:
-			raise PixivApiException('search fail, {}'.format(response.status_code))
+			raise 'Download fail, {}'.format(response.status_code)
 
 		response.encoding = 'utf-8'
+		url = re.search(FORMAT_IMAGE, response.text)
+		if url:
+			url = url.group()
+			download_url = 'https://' + url[11:-1].replace('\\', '')
+		else:
+			raise PixivApiException('Download fail, illust_id: {} not found'.format(image_id))		
 
-		FORMAT_IMAGE = ';(https.{,30}?img-master.+?(jpg|png|mp4))&quot'
-		imagePool = [ match[0].replace('\\', '') for match in re.findall(FORMAT_IMAGE, response.text) ]
+		if file_name is None:
+			file_name = download_url.split('/')[-1]
+		else:
+			file_type = download_url.split('.')[-1]
+			file_name_name += '.' + file_type
 
-		return imagePool
+		# Set Referer header to bypass 403 forbidden
+		self.headers['Referer'] = referer_image_url
+		response = self.get(download_url, stream=True)
+
+		# check whether can download.
+		if response.status_code != 200:
+			self.headers.pop('Referer')
+			raise PixivApiException('Download {} fail, {}.'.format(image_url, response.status_code))
+
+		# Download file and store in current directory
+		with open(file_name, 'wb') as f:
+			for chunk in response.iter_content(chunk_size=1024):
+				if chunk:
+					f.write(chunk)
+
+		# Clean Referer header
+		self.headers.pop('Referer')
