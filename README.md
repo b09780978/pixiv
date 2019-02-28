@@ -51,10 +51,10 @@ if __name__ == '__main__':
 	for item in pool:
 		print(item['id'], item['author_id'], item['url'])
 
-	# get author's image at page 1.
-	pool = pixivapi.get_author_images(2973809, 1)
+	# get author's image.
+	pool = pixivapi.get_author_images(2973809)
 	for item in pool:
-		print(item['id'], item['url'])
+		print(item)
 
 	# download pixiv image by url.
 	pixivapi.download('https://i.pximg.net/c/240x240/img-master/img/2018/03/20/00/12/38/67820508_p0_master1200.jpg')
