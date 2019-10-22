@@ -1,13 +1,9 @@
-# pixiv
-a python project to fetch pixiv.net's image.
-
-# Usage
-``` python
 #-*- coding: utf-8 -*-
 from pixiv import PixivApi
 
-pixiv_id = YOUR_PIXIV_ACCOUNT
-password = YOUR_PASSWORD
+pixiv_id = 'YOUR_PIXIV_ID'
+password = 'YOUR_PIXIV_PASSWORD'
+
 
 if __name__ == '__main__':
 	api = PixivApi(pixiv_id, password)
@@ -71,4 +67,3 @@ if __name__ == '__main__':
 	#print(api.delete_bookmark(76642253))
 	
 	api.close()
-```

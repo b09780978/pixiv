@@ -1,264 +1,361 @@
 #-*- coding: utf-8 -*-
+from datetime import datetime
+import hashlib
 import json
-import time
-import re
-import requests
-from bs4 import BeautifulSoup
+import os
+from typing import Union
+from requests import Session, Response, codes
+from .utils import *
 from .Exception import PixivApiException
 
-# pixiv url and login url.
-PIXIV = 'https://www.pixiv.net'
-LOGIN_URL = 'https://accounts.pixiv.net/login'
-LOGIN_POST_URL = 'https://accounts.pixiv.net/api/login?lang=zh_tw'
+def convert_bool(o):
+	return 'true' if o else 'false'
 
-# user-agnet.
-headers = {
-	'User-Agent' : 'Mozilla/5.0 (Windows NT 6.1; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/62.0.3202.94 Safari/537.36'
+PIXIV_APP_URL = 'https://app-api.pixiv.net'
+PIXIV_OAUTH_URL = 'https://oauth.secure.pixiv.net'
+
+DEFAULT_HEADERS = {
+	'User-Agent' : 'PixivAndroidApp/5.0.64 (Android 6.0)',
+	'Accept-Language' : 'zh-TW,zh;q=0.9,en-US;q=0.8,en;q=0.7,ja;q=0.6',
 }
 
-# login data.
-LOGIN_PARAM = { 'lang' : 'zh_tw',
-				'source' : 'pc',
-				'view_type' : 'page',
-				'ref' : 'wwwtop_accounts_index',
-				}
+# restrict = [ public, private ]
 
-LOGIN_POST_DATA = {
-	'pixiv_id' : '',
-	'captcha' : '',
-	'g_recaptcha_response' : '',
-	'password' : '',
-	'post_key' : '',
-	'source' : 'pc',
-	'ref' : 'wwwtop_accounts_index',
-	'return_to' : 'https://www.pixiv.net/',
-}
+class PixivApi(Session):
+	client_id = 'MOBrBDS8blbauoSck0ZfDbtuzpyT'
+	client_secret = 'lsACyCD94FhDUtGTXi3QzcFE2uU1hqtDaKeqrdwj'
+	hash_secret = '28c1fdd170a5204386cb1313c7077b34f83e4aaf4aa829ce78c231e05b0bae2c'
 
-class BasePixivApi(requests.Session):
-	'''
-		set your pixiv_id and password, make you can fetch all image(over 18).
-		pixiv = PixivApi(pixiv_id, password)
-	'''
-	def __init__(self, parser='html.parser'):
-		super(BasePixivApi, self).__init__()
-		self.parser = parser
-		self.headers.update(headers)
+	_access_token = None
+	_refresh_token = None
 
-	'''
-		Input:
-			author_id : author's pixiv id.
-			page : which page your want to fetch.
-		Output:
-			image link list {'url' : image_url, 'id' : image_id}.
-	'''
-	def get_author_images(self, author_id):
-		target_url = 'https://www.pixiv.net/ajax/user/{}/profile/top'
-		response = self.get(target_url.format(author_id))
+	def __init__(self, username : str, password : str, access_token : str=None, refresh_token : str=None):
+		super(PixivApi, self).__init__()
+		self.headers.update(DEFAULT_HEADERS)
+		self._username = username
+		self._password = password
+		self._auth = False
+		self._auth = self.login()
 
-		# check whether author exits.
-		if response.status_code != 200:
-			raise PixivApiException('Author id {} doesn\'t exist, {}.'.format(author_id, response.status_code))
-
-		pixiv_json = response.json()
-
-		if pixiv_json['error'] != False:
-			raise PixivApiException('Author id {} doesn\'t exist.'.format(author_id))
-
-		imagePool = [ item[1]['url'] for item in pixiv_json['body']['illusts'].items() ]
-		return imagePool
-
-	'''
-		Input:
-			images : numbers of image you want to crawl.
-		Output:
-			list content rank male image's link and author's link.
-			[ {'url': image_link, 'author': author_link, 'id' : image_id} ]
-	'''
-	def get_rank(self, page=1, male=True, daily=False, r18=False):
-		mode = None
-		page = 1 if page<1 else page
-		# decide whether use daily.
-		if daily:
-			mode = 'daily_r18' if r18 else 'daily'
-		else:
-			mode = 'male' if male else 'female'
-			if r18:
-				mode += '_r18'
-
-		target_url = 'https://www.pixiv.net/ranking.php?mode={}&p={}&format=json'.format(mode, page)
-		response = self.get(target_url)
-
-		# check whether can get page.
-		if response.status_code != 200:
-			raise PixivApiException('Get rank {} fail, {}.'.format(target_url, response.status_code))
-
-		imagePool = []
-		pixiv_json = response.json()
-
-		if pixiv_json.get('error', None) is None:
-			for item in pixiv_json['contents']:
-				imagePool.append({'url' : item['url'], 'author_id' : item['user_id'], 'id' : item['illust_id']})
-
-		return imagePool
-
-	'''
-	Input:
-		keyword : the keyword you want to search.
-		page : which page that you want to fetch.
-		Output:
-			list of image link.
-	'''
-	def search(self, keyword, page=1):
-		if len(keyword) == 0:
-			raise PixivApiException('Search keyword can\t be empty.')
-		page = 1 if page<1 else page
-		SEARCH_URL = 'https://www.pixiv.net/search.php?s_mode=s_tag&word={}&order=date_d&p={}'
-		response = self.get(SEARCH_URL.format(keyword, page))
-		if response.status_code != 200:
-			raise PixivApiException('search fail, {}'.format(response.status_code))
-
-		response.encoding = 'utf-8'
-
-		FORMAT_IMAGE = ';(https.{,30}?img-master.+?(jpg|png|mp4))&quot'
-		imagePool = [ match[0].replace('\\', '') for match in re.findall(FORMAT_IMAGE, response.text) ]
-
-		return imagePool
-
-'''
-	Pixiv Guest Api:
-		Without login your account, but the image you can get is limited
-'''
-class PixivGuestApi(BasePixivApi):
-	pass
-
-'''
-	Pixiv Api:
-		Auto login your account for you get image resource
-'''
-class PixivApi(BasePixivApi):
-	'''
-		set your pixiv_id and password, make you can fetch all image(over 18).
-		pixiv = PixivApi(pixiv_id, password)
-	'''
-	def __init__(self, pixiv_id, password, parser='html.parser'):
-		super(PixivApi, self).__init__(parser)
-		self.pixiv_id = pixiv_id
-		self.password = password
-		self.headers.update(headers)
-		self.login()
-
-	'''
-		login your acount.
-	'''
 	def login(self):
-		response = self.get(LOGIN_URL, params=LOGIN_PARAM)
-		parser = BeautifulSoup(response.text, self.parser)
-		post_key = parser.select('[name=post_key]')[0]['value']
+		current_time = datetime.now().isoformat()
+		self.headers.update({
+				'X-Client-Time' : current_time,
+				'X-Client-Hash' : hashlib.md5((current_time + self.hash_secret).encode('utf-8')).hexdigest()
+			})
 
-		# prevent to fast.
-		time.sleep(0.5)
-		LOGIN_POST_DATA.update({'pixiv_id' : self.pixiv_id,
-								'password' : self.password,
-								'post_key' : post_key,})
-		self.post(LOGIN_POST_URL, data=LOGIN_POST_DATA)
+		oauth_url = 'https://oauth.secure.pixiv.net/auth/token'
 
-		# use r18 rank to check whether success login.
-		check_login_url = 'https://www.pixiv.net/ranking.php?mode=daily_r18&content=illust'
-		response = self.get(check_login_url)
-		if response.status_code != 200:
-			raise PixivApiException('Login fail, {}.'.format(response.status_code))
+		oauth_post_data = {
+			'get_secure_url' : 1,
+			'client_id' : self.client_id,
+			'client_secret' : self.client_secret,
+		}
 
-	'''
-		Input:
-			page : which page that you want to fetch.
-		Output:
-			list of image link {'url' : image_url, 'id' : image_id}.
-	'''
-	def get_follow(self, page=1):
-		page = 1 if page<1 else page
-		target_url = 'https://www.pixiv.net/bookmark_new_illust.php?p={}'
-		imagePool = []
+		'''
+			Acording whether access_token and refresh_token exist to select oauth method
+		'''
+		if (self._access_token is not None) and (self._refresh_token is not None):
+			oauth_post_data['grant_type'] = 'refresh_token'
+			data['refresh_token'] = self._refresh_token
 
-		response = self.get(target_url.format(page))
-		parser = BeautifulSoup(response.text, self.parser)
-		for block in parser.select('#js-mount-point-latest-following'):
-			data = json.loads(block['data-items'])
-			for image_item in data:
-				imagePool.append( { 'url' : image_item['url'].replace('\\',''), 'id' : image_item['illustId'] })
+		elif (self._username is not None) and (self._password is not None):
+			oauth_post_data['grant_type'] = 'password'
+			oauth_post_data['username'] = self._username
+			oauth_post_data['password'] = self._password
 
-		return imagePool
-
-	'''
-		Input:
-			page : which page that you want to fetch.
-		Output:
-			list of image link.
-	'''
-	def get_favorite(self, page=1):
-		page = 1 if page<1 else page
-		FAVORITE_URL = 'https://www.pixiv.net/bookmark.php?rest=show&p={}&order=desc'
-		response = self.get(FAVORITE_URL.format(page))
-		if response.status_code != 200:
-			raise PixivApiException('Get favorite fail, {}.'.format(response.status_code))
-
-		response.encoding = 'utf-8'
-		
-		parser = BeautifulSoup(response.text, self.parser)
-		imagePool = [ element['data-src'] for element in parser.select('[data-src]') if re.search('(jpg|png|mp4)', element['data-src']) is not None ]
-
-		return imagePool
-
-	'''
-		Input:
-			image_url : image's url.
-			file_name : store file name.
-		Output:
-			None, download the image.
-	'''
-	def download(self, image_url, file_name=None):
-		FORMAT_ID = '\d{5,}'
-		FORMAT_IMAGE = '\"https.{,30}img-original.+?(jpg|png|mp4)\"'
-
-		image_id = re.search(FORMAT_ID, image_url)
-		if image_id is None:
-			raise PixivApiException('Can\'t get image id')
-
-		image_id = image_id.group()
-		referer_image_url = 'https://www.pixiv.net/member_illust.php?mode=medium&illust_id={}'.format(image_id)
-
-		response = self.get(referer_image_url)
-
-		if response.status_code != 200:
-			raise 'Download fail, {}'.format(response.status_code)
-
-		response.encoding = 'utf-8'
-		url = re.search(FORMAT_IMAGE, response.text)
-		if url:
-			url = url.group()
-			download_url = 'https://' + url[11:-1].replace('\\', '')
 		else:
-			raise PixivApiException('Download fail, illust_id: {} not found'.format(image_id))		
+			self._auth = False
+			raise PixivApiException('Unknow auth method')
 
-		if file_name is None:
-			file_name = download_url.split('/')[-1]
-		else:
-			file_type = download_url.split('.')[-1]
-			file_name_name += '.' + file_type
+		resp = self.post(oauth_url, data=oauth_post_data)
 
-		# Set Referer header to bypass 403 forbidden
-		self.headers['Referer'] = referer_image_url
-		response = self.get(download_url, stream=True)
+		if resp.status_code != codes.all_ok:
+			raise PixivApiException('Pixiv Oauth fail\n{}: {}'.format(resp.status_code, resp.text))
 
-		# check whether can download.
-		if response.status_code != 200:
-			self.headers.pop('Referer')
-			raise PixivApiException('Download {} fail, {}.'.format(image_url, response.status_code))
+		resp_json = get_pretty_response(resp)
 
-		# Download file and store in current directory
-		with open(file_name, 'wb') as f:
-			for chunk in response.iter_content(chunk_size=1024):
+		self._access_token = resp_json.response.access_token
+		self._refresh_token = resp_json.response.refresh_token
+		self._user_id = resp_json.response.user.id
+
+		# Clean oauth request header and set Authorization to access_token
+		self.headers.pop('X-Client-Time')
+		self.headers.pop('X-Client-Hash')
+		self.headers['Authorization'] = 'Bearer {}'.format(self._access_token)
+
+
+	# get illust detail infomation
+	def illust(self, illust_id : int) -> JsonDict:
+		query_url = '{}/v1/illust/detail'.format(PIXIV_APP_URL)
+		resp = self.get(query_url, params={	'illust_id' : illust_id, })
+		return get_pretty_response(resp)
+
+	def illust_related(self, illust_id : int, offset : int=0) -> JsonDict:
+		query_url = '{}/v2/illust/related'.format(PIXIV_APP_URL)
+		resp = self.get(query_url, params={'illust_id' : illust_id, 'filter' : 'for_ios', 'offset' : offset})
+		return get_pretty_response(resp)
+
+	def recommended(self, offset : int=None, ranking_label : bool=True, ranking_illust : bool=True, privacy : bool=True) -> JsonDict:
+		recommand_url = '{}/v1/illust/recommended'.format(PIXIV_APP_URL)
+
+		recommand_params = {
+			'content_type' : 'illust',
+			'filter' : 'for_ios',
+			'include_ranking_label' : convert_bool(ranking_label),
+			'include_ranking_illusts' : convert_bool(ranking_illust),
+			'include_privacy_illusts' : convert_bool(privacy),
+		}
+
+		if offset is not None:
+			recommand_params['offset'] = offset
+
+		resp = self.get(recommand_url, params=recommand_params)
+		return get_pretty_response(resp)
+
+	# That's a bad idea. Only return JsonDict not check whether the illust is bookmarked
+	def bookmark_info(self, illust_id : Union [ int, str ]) -> JsonDict:
+		url = '{}/v2/illust/bookmark/detail'.format(PIXIV_APP_URL)
+		resp = self.get(url, params={'illust_id' : illust_id })
+		return get_pretty_response(resp)
+
+	# It's works, but return empty dict back.
+	def add_bookmark(self, illust_id : Union[ int, str ], restrict : str='public', tag : str=None) -> JsonDict:
+		url = '{}/v2/illust/bookmark/add'.format(PIXIV_APP_URL)
+		data = {
+			'illust_id' : illust_id,
+			'restrict' : restrict,
+		}
+
+		if tag is not None:
+			data['tag'] = tag
+
+		resp = self.post(url, data=data)
+		return get_pretty_response(resp)
+
+	def delete_bookmark(self, illust_id : Union[ int, str ]) -> JsonDict:
+		url = '{}/v1/illust/bookmark/delete'.format(PIXIV_APP_URL)
+		resp = self.post(url, data={'illust_id' : illust_id})
+		return get_pretty_response(resp)
+
+	def bookmark_tags(self, restrict : str='public', offset : int=None) -> JsonDict:
+		url = '{}/v1/user/bookmark-tags/illust'.format(PIXIV_APP_URL)
+		params = {
+			'restrict' : restrict,
+		}
+
+		if offset is not None:
+			params['offset'] = offset
+
+		resp = self.get(url, params=params)
+		return get_pretty_response(resp)
+
+	def hot_tags(self) -> JsonDict:
+		url = '{}/v1/trending-tags/illust'.format(PIXIV_APP_URL)
+		resp = self.get(url, params={'filter' : 'for_ios'})
+		return get_pretty_response(resp)
+
+	def user(self, user_id : Union[ int, str] ) -> JsonDict:
+		user_url = '{}/v1/user/detail'.format(PIXIV_APP_URL)
+		resp = self.get(user_url, params={'user_id' : user_id, 'filter' : 'for_ios'})
+		return get_pretty_response(resp)
+
+	def user_illusts(self, user_id : Union[ int, str ], offset : int=None) -> JsonDict:
+		url = '{}/v1/user/illusts'.format(PIXIV_APP_URL)
+		params = {
+			'user_id' : user_id,
+			'filter' : 'for_ios',
+		}
+
+		if offset is not None:
+			params['offset'] = offset
+
+		resp = self.get(url, params=params)
+		return get_pretty_response(resp)
+
+	def user_bookmarks(self, user_id : Union[ int, str ], restrict : str='public', tag : str=None) -> JsonDict:
+		url = '{}/v1/user/bookmarks/illust'.format(PIXIV_APP_URL)
+
+		params = {
+			'user_id' : user_id,
+			'filter' : 'for_ios',
+			'restrict' : restrict,
+		}
+
+		if tag is not None:
+			params['tag'] = tag
+
+		resp = self.get(url, params=params)
+		return get_pretty_response(resp)
+
+	def new_follow_illusts(self, restrict : str='public', offset : int=None) -> JsonDict:
+		url = '{}/v2/illust/follow'.format(PIXIV_APP_URL)
+		params = {
+			'restrict' : restrict,
+		}
+
+		if offset is not None:
+			params['offset'] = offset
+
+		resp = self.get(url, params=params)
+		return get_pretty_response(resp)
+
+	def user_following(self, user_id : Union[ int, str ], restrict : str='public', offset : int=None) -> JsonDict:
+		url = '{}/v1/user/following'.format(PIXIV_APP_URL)
+		params = {
+			'user_id' : user_id,
+			'restrict' : restrict
+		}
+
+		if offset:
+			params['offset'] = offset
+
+		resp = self.get(url, params=params)
+		return get_pretty_response(resp)
+
+	def user_follower(self, user_id : Union[ int, str ], offset : int=None) -> JsonDict:
+		url = '{}/v1/user/follower'.format(PIXIV_APP_URL)
+		params = {
+			'user_id' : user_id,
+			'filter' : 'for_ios',
+		}
+
+		if offset is not None:
+			params['offset'] = offset
+
+		resp = self.get(url, params=params)
+		return get_pretty_response(resp)
+
+	def _download(self, url: str, filename: str, path: str) -> bool:
+		self.headers['Referer'] = 'https://app-api.pixiv.net/'
+		success = True
+		f = None
+
+		try:
+			f = open(filename, 'wb')
+			resp = self.get(url, stream=True)
+
+			for chunk in resp.iter_content(chunk_size=1024):
 				if chunk:
 					f.write(chunk)
+		except Exception as e:
+			success =  False
+		finally:
+			f.close()
+			self.headers.pop('Referer')
 
-		# Clean Referer header
-		self.headers.pop('Referer')
+		return True
+
+	def download(self, illust_id: Union [ int, str ], filename: str=None, path : str=os.path.curdir) -> bool:
+		illust = self.illust(illust_id)
+
+		if illust.error is not None:
+			return False
+
+		if filename is None:
+			filename = '{}_{}.jpg'.format(illust.illust.title, illust.illust.id)
+			os.path.join(path, filename)
+
+		image_url = illust.illust.image_urls.large
+		
+		success = self._download(image_url, filename, path)
+
+		return success
+
+	def download_all(self, illust_id: int, filename: str=None, path : str=os.path.curdir) -> bool:
+		illust = self.illust(illust_id)
+
+		if illust.error is not None:
+			return False
+
+		if filename is None:
+			filename = '{}_{}'.format(illust.illust.title, illust.illust.id)
+		else:
+			filename = '{}_{}'.format(filename)
+		filename += '_{}.jpg'
+						
+		illusts = illust.illust.meta_pages
+		index = 0
+		for item in illusts:
+			self._download(item.image_urls.original, filename.format(index), path)
+			index += 1
+
+		return True
+
+	'''
+		keyword : string keyword
+		desc_sort : True=> date_desc False=>date_asc
+		search_title and strict: bool to choose ['exact_match_for_tags', 'partial_match_for_tags', 'title_and_caption']
+	'''
+	def search(self, keyword: str, desc_sort : bool=True, search_title : bool=True, strict : bool=False, duration : str='within_last_day', offset : int=0) -> JsonDict:
+		query_url = '{}/v1/search/illust'.format(PIXIV_APP_URL)
+
+		if desc_sort:
+			sort = 'date_desc'
+		else:
+			sort = 'date_asc'
+
+		if search_title and strict:
+			search_policy = 'exact_match_for_tags'
+		elif search_title and (not strict):
+			search_policy = 'partial_match_for_tags'
+		else:
+			search_policy = 'title_and_caption'
+
+		if duration not in ['within_last_day', 'within_last_week', 'within_last_month']:
+			raise PixivApiException('duration must in if duration not in [ within_last_day, within_last_week, within_last_month ]')
+
+		search_params = {
+			'word' : keyword,
+			'search_target' : search_policy,
+			'sort' : sort,
+			'filter' : 'for_ios',
+			'duration' : duration,
+			'offset' : offset,
+		}
+
+		resp = self.get(query_url, params=search_params)
+		return get_pretty_response(resp)
+
+	'''
+		mode : [ 'day', 'week', 'month', 
+		         'day_male', 'day_female', 'week_original',
+		         'week_rookie', 'day_r18', 'day_male_r18',
+		         'day_female_r18', 'week_r18', 'week_r18g'
+		        ]
+		 date format: YYYY-MM-DD
+	'''
+	def rank(self, day : str='day', male : str=None, r18 : bool=True, original : bool=False, rookie : bool=False, date : str=None, offset: int=None) -> JsonDict:
+		if day not in ['day', 'week', 'month']:
+			raise PixivApiException('day must in [ day, week, month] ')
+
+		rank_url = '{}/v1/illust/ranking'.format(PIXIV_APP_URL)
+		mode = day
+		# ['day', 'day_r18', 'day_male', 'day_male_r18', 'day_female', 'day_female_r18']
+		if day == 'day':
+			if male is not None:
+				mode += '_male' if male else '_female'
+			if r18:
+				mode += '_r18'
+		# ignore original = True and rookie = True
+		elif day == 'week':
+			if original and (not rookie):
+				mode += '_original'
+			elif (not original) and rookie:
+				mode += '_rookie'
+
+		rank_params = {
+			'mode' : mode,
+			'filter' : 'for_ios',
+		}
+
+		if date is not None:
+			rank_params['date'] = date
+		if offset is not None:
+			rank_params['offset'] = offset
+
+		resp = self.get(rank_url, params=rank_params)
+		return get_pretty_response(resp)
+
+	def __del__(self):
+		self.close() 
